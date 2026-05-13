@@ -7,7 +7,7 @@ function isPublicPath(pathname: string) {
   return PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(p + '/'))
 }
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
   let supabaseResponse = NextResponse.next({ request })
 
@@ -32,17 +32,14 @@ export async function middleware(request: NextRequest) {
     }
   )
 
-  // IMPORTANT: never write logic between createServerClient and getUser()
   const {
     data: { user },
   } = await supabase.auth.getUser()
 
-  // Public paths pass through
   if (isPublicPath(pathname)) {
     return supabaseResponse
   }
 
-  // No authentication → redirect to /login
   if (!user) {
     return NextResponse.redirect(new URL('/login', request.url))
   }

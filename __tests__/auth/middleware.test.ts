@@ -19,16 +19,16 @@ vi.mock('next/server', () => {
 })
 
 import { NextResponse } from 'next/server'
-import { middleware } from '@/middleware'
+import { proxy } from '@/proxy'
 
 const mockRequest = (pathname: string) =>
   ({
     nextUrl: { pathname },
     url: `http://localhost:3000${pathname}`,
     cookies: { getAll: vi.fn(() => []), set: vi.fn() },
-  }) as unknown as Parameters<typeof middleware>[0]
+  }) as unknown as Parameters<typeof proxy>[0]
 
-describe('Middleware — proteção de rotas', () => {
+describe('Proxy — proteção de rotas', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.mocked(NextResponse.next).mockReturnValue({ cookies: { set: vi.fn() } } as never)
@@ -37,21 +37,21 @@ describe('Middleware — proteção de rotas', () => {
   it('rota pública /login passa sem redirecionar', async () => {
     mockGetUser.mockResolvedValue({ data: { user: null } })
     const req = mockRequest('/login')
-    await middleware(req)
+    await proxy(req)
     expect(NextResponse.redirect).not.toHaveBeenCalled()
   })
 
   it('rota pública /auth/callback passa sem redirecionar', async () => {
     mockGetUser.mockResolvedValue({ data: { user: null } })
     const req = mockRequest('/auth/callback')
-    await middleware(req)
+    await proxy(req)
     expect(NextResponse.redirect).not.toHaveBeenCalled()
   })
 
   it('rota protegida sem usuário redireciona para /login', async () => {
     mockGetUser.mockResolvedValue({ data: { user: null } })
     const req = mockRequest('/academy')
-    await middleware(req)
+    await proxy(req)
     expect(NextResponse.redirect).toHaveBeenCalledWith(
       expect.objectContaining({ pathname: '/login' })
     )
@@ -60,7 +60,7 @@ describe('Middleware — proteção de rotas', () => {
   it('rota /admin sem autenticação redireciona para /login', async () => {
     mockGetUser.mockResolvedValue({ data: { user: null } })
     const req = mockRequest('/admin/dashboard')
-    await middleware(req)
+    await proxy(req)
     expect(NextResponse.redirect).toHaveBeenCalledWith(
       expect.objectContaining({ pathname: '/login' })
     )
@@ -69,14 +69,14 @@ describe('Middleware — proteção de rotas', () => {
   it('usuário autenticado em rota protegida não redireciona', async () => {
     mockGetUser.mockResolvedValue({ data: { user: { id: 'user-1' } } })
     const req = mockRequest('/academy')
-    await middleware(req)
+    await proxy(req)
     expect(NextResponse.redirect).not.toHaveBeenCalled()
   })
 
   it('usuário autenticado em /admin não redireciona (role check fica no layout)', async () => {
     mockGetUser.mockResolvedValue({ data: { user: { id: 'user-1' } } })
     const req = mockRequest('/admin/dashboard')
-    await middleware(req)
+    await proxy(req)
     expect(NextResponse.redirect).not.toHaveBeenCalled()
   })
 })
