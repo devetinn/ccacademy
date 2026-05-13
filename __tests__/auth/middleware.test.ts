@@ -1,138 +1,82 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-// Mock next/server
-vi.mock('next/server', () => ({
-  NextResponse: {
-    next: vi.fn(() => ({ cookies: { set: vi.fn() } })),
-    redirect: vi.fn((url: URL) => ({ redirected: true, url: url.toString() })),
-  },
+const mockGetUser = vi.fn()
+
+vi.mock('@supabase/ssr', () => ({
+  createServerClient: vi.fn(() => ({
+    auth: { getUser: mockGetUser },
+  })),
 }))
 
-// Mock updateSession
-vi.mock('@/lib/supabase/middleware', () => ({
-  updateSession: vi.fn(),
-}))
+vi.mock('next/server', () => {
+  const NextResponse = {
+    next: vi.fn(() => ({
+      cookies: { set: vi.fn() },
+    })),
+    redirect: vi.fn((url: URL) => ({ redirected: true, url: url.toString() })),
+  }
+  return { NextResponse }
+})
 
 import { NextResponse } from 'next/server'
-import { updateSession } from '@/lib/supabase/middleware'
 import { middleware } from '@/middleware'
 
 const mockRequest = (pathname: string) =>
   ({
     nextUrl: { pathname },
     url: `http://localhost:3000${pathname}`,
-    cookies: { getAll: vi.fn(() => []) },
+    cookies: { getAll: vi.fn(() => []), set: vi.fn() },
   }) as unknown as Parameters<typeof middleware>[0]
-
-const mockSupabaseResponse = { type: 'supabaseResponse' }
 
 describe('Middleware — proteção de rotas', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.mocked(NextResponse.next).mockReturnValue({ cookies: { set: vi.fn() } } as never)
   })
 
-  it('rota pública /login passa sem verificação de autenticação', async () => {
-    vi.mocked(updateSession).mockResolvedValue({
-      supabaseResponse: mockSupabaseResponse as never,
-      user: null,
-      supabase: {} as never,
-    })
-
+  it('rota pública /login passa sem redirecionar', async () => {
+    mockGetUser.mockResolvedValue({ data: { user: null } })
     const req = mockRequest('/login')
-    const res = await middleware(req)
-
-    expect(res).toBe(mockSupabaseResponse)
+    await middleware(req)
     expect(NextResponse.redirect).not.toHaveBeenCalled()
   })
 
-  it('rota pública /auth/callback passa sem verificação', async () => {
-    vi.mocked(updateSession).mockResolvedValue({
-      supabaseResponse: mockSupabaseResponse as never,
-      user: null,
-      supabase: {} as never,
-    })
-
+  it('rota pública /auth/callback passa sem redirecionar', async () => {
+    mockGetUser.mockResolvedValue({ data: { user: null } })
     const req = mockRequest('/auth/callback')
-    const res = await middleware(req)
-
-    expect(res).toBe(mockSupabaseResponse)
+    await middleware(req)
     expect(NextResponse.redirect).not.toHaveBeenCalled()
   })
 
   it('rota protegida sem usuário redireciona para /login', async () => {
-    vi.mocked(updateSession).mockResolvedValue({
-      supabaseResponse: mockSupabaseResponse as never,
-      user: null,
-      supabase: {} as never,
-    })
-
+    mockGetUser.mockResolvedValue({ data: { user: null } })
     const req = mockRequest('/academy')
     await middleware(req)
-
     expect(NextResponse.redirect).toHaveBeenCalledWith(
       expect.objectContaining({ pathname: '/login' })
     )
   })
 
-  it('rota /admin/* com role=student redireciona para /', async () => {
-    const mockSupabase = {
-      from: vi.fn(() => ({
-        select: vi.fn(() => ({
-          eq: vi.fn(() => ({
-            single: vi.fn(() => ({ data: { role: 'student' } })),
-          })),
-        })),
-      })),
-    }
-
-    vi.mocked(updateSession).mockResolvedValue({
-      supabaseResponse: mockSupabaseResponse as never,
-      user: { id: 'user-1' } as never,
-      supabase: mockSupabase as never,
-    })
-
+  it('rota /admin sem autenticação redireciona para /login', async () => {
+    mockGetUser.mockResolvedValue({ data: { user: null } })
     const req = mockRequest('/admin/dashboard')
     await middleware(req)
-
     expect(NextResponse.redirect).toHaveBeenCalledWith(
-      expect.objectContaining({ pathname: '/' })
+      expect.objectContaining({ pathname: '/login' })
     )
   })
 
-  it('rota /admin/* com role=admin libera acesso', async () => {
-    const mockSupabase = {
-      from: vi.fn(() => ({
-        select: vi.fn(() => ({
-          eq: vi.fn(() => ({
-            single: vi.fn(() => ({ data: { role: 'admin' } })),
-          })),
-        })),
-      })),
-    }
-
-    vi.mocked(updateSession).mockResolvedValue({
-      supabaseResponse: mockSupabaseResponse as never,
-      user: { id: 'user-1' } as never,
-      supabase: mockSupabase as never,
-    })
-
-    const req = mockRequest('/admin/dashboard')
-    const res = await middleware(req)
-
-    expect(res).toBe(mockSupabaseResponse)
+  it('usuário autenticado em rota protegida não redireciona', async () => {
+    mockGetUser.mockResolvedValue({ data: { user: { id: 'user-1' } } })
+    const req = mockRequest('/academy')
+    await middleware(req)
     expect(NextResponse.redirect).not.toHaveBeenCalled()
   })
 
-  it('usuário autenticado em rota não-admin retorna supabaseResponse', async () => {
-    vi.mocked(updateSession).mockResolvedValue({
-      supabaseResponse: mockSupabaseResponse as never,
-      user: { id: 'user-1' } as never,
-      supabase: {} as never,
-    })
-
-    const req = mockRequest('/academy')
-    const res = await middleware(req)
-
-    expect(res).toBe(mockSupabaseResponse)
+  it('usuário autenticado em /admin não redireciona (role check fica no layout)', async () => {
+    mockGetUser.mockResolvedValue({ data: { user: { id: 'user-1' } } })
+    const req = mockRequest('/admin/dashboard')
+    await middleware(req)
+    expect(NextResponse.redirect).not.toHaveBeenCalled()
   })
 })
